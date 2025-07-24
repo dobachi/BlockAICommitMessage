@@ -13,6 +13,24 @@ NC='\033[0m' # No Color
 AI_DETECTED=0
 DETECTION_REASONS=()
 
+# 設定ファイルの読み込み
+CONFIG_FILE=""
+if [ -f "$HOME/.blockaicommit/config/ai-detection.conf" ]; then
+    CONFIG_FILE="$HOME/.blockaicommit/config/ai-detection.conf"
+elif [ -f "$(dirname "$0")/../config/ai-detection.conf" ]; then
+    CONFIG_FILE="$(dirname "$0")/../config/ai-detection.conf"
+fi
+
+if [ -n "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+fi
+
+# デフォルト値の設定
+DETECTION_LEVEL=${detection_level:-low}
+ALLOW_EMOJI=${allow_emoji:-false}
+CHECK_GRAMMAR=${check_grammar:-true}
+CHECK_VOCABULARY=${check_vocabulary:-true}
+
 # 引数チェック
 if [ $# -eq 0 ]; then
     echo "使用方法: $0 \"コミットメッセージ\""
@@ -56,54 +74,74 @@ for sig in "${AI_SIGNATURES[@]}"; do
     fi
 done
 
-# 2. 典型的なAIコミットメッセージパターン検出
-declare -a AI_PATTERNS=(
-    "^(feat|fix|docs|style|refactor|test|chore)(\(.+\))?: [A-Z].*"  # 過度に整形されたconventional commits
-    "This commit .* the following"
-    "This change .* to"
-    "Updates? .* to .* for better"
-    "Refactors? .* to improve"
-    "Implements? .* functionality"
-    "Adds? .* support for"
-    "^- .* \n- .* \n- .*"  # 箇条書きリスト形式
-)
-
-for pattern in "${AI_PATTERNS[@]}"; do
-    if echo "$MESSAGE" | grep -Pq "$pattern" 2>/dev/null || echo "$MESSAGE" | grep -Eq "$pattern"; then
-        AI_DETECTED=1
-        DETECTION_REASONS+=("AIパターンマッチ: '$pattern'")
+# 2. 典型的なAIコミットメッセージパターン検出（mediumレベル以上）
+if [ "$DETECTION_LEVEL" = "medium" ] || [ "$DETECTION_LEVEL" = "high" ]; then
+    declare -a AI_PATTERNS=(
+        "This commit .* the following"
+        "This change .* to"
+        "Updates? .* to .* for better"
+        "Refactors? .* to improve"
+        "Implements? .* functionality"
+        "Adds? .* support for"
+        "^- .* \n- .* \n- .*"  # 箇条書きリスト形式（3項目以上）
+    )
+    
+    # Conventional Commitsは、highレベルでのみ「過度に整形」をチェック
+    if [ "$DETECTION_LEVEL" = "high" ]; then
+        AI_PATTERNS+=("^(feat|fix|docs|style|refactor|test|chore)(\(.+\))?: [A-Z].*\. [A-Z].*")  # 複数文の場合のみ
     fi
-done
 
-# 3. 文体分析
-# 過度に形式的または説明的な文体
-if echo "$MESSAGE" | grep -Eq "(enhance|optimize|streamline|implement|incorporate|facilitate|utilize)" ; then
-    FORMAL_WORD_COUNT=$(echo "$MESSAGE" | grep -o -E "(enhance|optimize|streamline|implement|incorporate|facilitate|utilize)" | wc -l)
-    if [ $FORMAL_WORD_COUNT -ge 2 ]; then
-        AI_DETECTED=1
-        DETECTION_REASONS+=("過度に形式的な語彙使用 (${FORMAL_WORD_COUNT}個)")
+    for pattern in "${AI_PATTERNS[@]}"; do
+        if echo "$MESSAGE" | grep -Pq "$pattern" 2>/dev/null || echo "$MESSAGE" | grep -Eq "$pattern"; then
+            AI_DETECTED=1
+            DETECTION_REASONS+=("AIパターンマッチ: '$pattern'")
+        fi
+    done
+fi
+
+# 3. 文体分析（mediumレベル以上かつcheck_vocabularyが有効）
+if [ "$CHECK_VOCABULARY" = "true" ] && ([ "$DETECTION_LEVEL" = "medium" ] || [ "$DETECTION_LEVEL" = "high" ]); then
+    # 過度に形式的または説明的な文体
+    if echo "$MESSAGE" | grep -Eq "(enhance|optimize|streamline|implement|incorporate|facilitate|utilize)" ; then
+        FORMAL_WORD_COUNT=$(echo "$MESSAGE" | grep -o -E "(enhance|optimize|streamline|implement|incorporate|facilitate|utilize)" | wc -l)
+        # mediumでは3個以上、highでは2個以上で検出
+        local threshold=3
+        [ "$DETECTION_LEVEL" = "high" ] && threshold=2
+        
+        if [ $FORMAL_WORD_COUNT -ge $threshold ]; then
+            AI_DETECTED=1
+            DETECTION_REASONS+=("過度に形式的な語彙使用 (${FORMAL_WORD_COUNT}個)")
+        fi
     fi
 fi
 
-# 4. 構造分析
-# 完璧な文法と句読点
-SENTENCE_COUNT=$(echo "$MESSAGE" | grep -o '[.!?]' | wc -l)
-WORD_COUNT=$(echo "$MESSAGE" | wc -w)
-if [ $WORD_COUNT -gt 20 ] && [ $SENTENCE_COUNT -gt 2 ]; then
-    # 長いメッセージで完璧な文構造
-    if echo "$MESSAGE" | grep -Eq "^[A-Z].*[.!?]$" && ! echo "$MESSAGE" | grep -q "[.!?][^[:space:]]"; then
-        AI_DETECTED=1
-        DETECTION_REASONS+=("完璧な文法構造 (${SENTENCE_COUNT}文, ${WORD_COUNT}語)")
+# 4. 構造分析（highレベルのみかつcheck_grammarが有効）
+if [ "$CHECK_GRAMMAR" = "true" ] && [ "$DETECTION_LEVEL" = "high" ]; then
+    # 完璧な文法と句読点
+    SENTENCE_COUNT=$(echo "$MESSAGE" | grep -o '[.!?]' | wc -l)
+    WORD_COUNT=$(echo "$MESSAGE" | wc -w)
+    if [ $WORD_COUNT -gt 30 ] && [ $SENTENCE_COUNT -gt 2 ]; then
+        # 長いメッセージで完璧な文構造
+        if echo "$MESSAGE" | grep -Eq "^[A-Z].*[.!?]$" && ! echo "$MESSAGE" | grep -q "[.!?][^[:space:]]"; then
+            AI_DETECTED=1
+            DETECTION_REASONS+=("完璧な文法構造 (${SENTENCE_COUNT}文, ${WORD_COUNT}語)")
+        fi
     fi
 fi
 
-# 5. メタデータチェック
-# 複数の変更を詳細に列挙
-if echo "$MESSAGE" | grep -cE "^[-*] " > /dev/null; then
-    LIST_ITEMS=$(echo "$MESSAGE" | grep -cE "^[-*] ")
-    if [ $LIST_ITEMS -ge 3 ]; then
-        AI_DETECTED=1
-        DETECTION_REASONS+=("詳細な箇条書き形式 (${LIST_ITEMS}項目)")
+# 5. メタデータチェック（mediumレベル以上）
+if [ "$DETECTION_LEVEL" = "medium" ] || [ "$DETECTION_LEVEL" = "high" ]; then
+    # 複数の変更を詳細に列挙
+    if echo "$MESSAGE" | grep -cE "^[-*] " > /dev/null; then
+        LIST_ITEMS=$(echo "$MESSAGE" | grep -cE "^[-*] ")
+        # mediumでは5項目以上、highでは3項目以上で検出
+        local threshold=5
+        [ "$DETECTION_LEVEL" = "high" ] && threshold=3
+        
+        if [ $LIST_ITEMS -ge $threshold ]; then
+            AI_DETECTED=1
+            DETECTION_REASONS+=("詳細な箇条書き形式 (${LIST_ITEMS}項目)")
+        fi
     fi
 fi
 

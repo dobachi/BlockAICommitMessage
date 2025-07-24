@@ -87,18 +87,43 @@ cd BlockAICommitMessage
 
 ## 設定
 
-`config/ai-detection.conf`で動作をカスタマイズできます:
+`config/ai-detection.conf`で動作をカスタマイズできます。
+
+### 検出レベル
+
+| レベル | 説明 | 検出内容 |
+|--------|------|----------|
+| **low** | 最小限（デフォルト） | AI署名、Bot表記、AI関連メールアドレスのみ |
+| **medium** | 標準 | lowに加え、AIらしい文体パターンと形式的語彙 |
+| **high** | 厳格 | すべての検出方法を使用、Conventional Commitsの過度な使用も検出 |
+
+### 主な設定項目
 
 ```conf
-# 検出レベル: low, medium, high
-detection_level=medium
+# 検出レベル（推奨: low）
+detection_level=low
 
-# 絵文字を許可
+# 絵文字を許可（false: 🤖があれば即検出）
 allow_emoji=false
 
+# 文法チェック（highレベルでのみ有効）
+check_grammar=true
+
+# 語彙分析（medium以上で有効）
+check_vocabulary=true
+
 # インタラクティブモードをデフォルトに
-interactive_by_default=true
+interactive_by_default=false
+
+# 詳細なレポート表示
+show_detailed_report=true
 ```
+
+### 検出レベル別の違い
+
+- **low**: プロジェクトでConventional Commitsを使用している場合に推奨
+- **medium**: AIパターンは検出したいが、通常の開発フローは妨げたくない場合
+- **high**: 厳格にAI生成を排除したい場合（誤検出の可能性あり）
 
 ## Git Hooksの動作
 
