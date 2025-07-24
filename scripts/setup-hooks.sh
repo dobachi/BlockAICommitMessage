@@ -12,10 +12,47 @@ NC='\033[0m' # No Color
 
 # スクリプトのディレクトリ
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BLOCKAICOMMIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# アクション
+# 引数処理
 ACTION=${1:-status}
+INSTALL_METHOD="copy"  # デフォルト: copy, symlink, standalone
+
+# 引数を解析
+shift
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --standalone)
+            INSTALL_METHOD="standalone"
+            shift
+            ;;
+        --symlink)
+            INSTALL_METHOD="symlink"
+            shift
+            ;;
+        --copy)
+            INSTALL_METHOD="copy"
+            shift
+            ;;
+        *)
+            TARGET_REPO="$1"
+            shift
+            ;;
+    esac
+done
+
+# ターゲットリポジトリが指定されていない場合はカレントディレクトリ
+TARGET_REPO=${TARGET_REPO:-$(pwd)}
+
+# ターゲットリポジトリの検証
+if [ "$ACTION" != "install-global" ] && [ "$ACTION" != "help" ]; then
+    # install, uninstall, statusの場合はターゲットリポジトリを確認
+    if [ ! -d "$TARGET_REPO/.git" ]; then
+        echo -e "${RED}エラー: $TARGET_REPO はGitリポジトリではありません${NC}"
+        echo -e "${YELLOW}使用方法: $0 $ACTION [オプション] [対象リポジトリのパス]${NC}"
+        exit 1
+    fi
+fi
 
 # Git リポジトリチェック
 check_git_repo() {
@@ -29,6 +66,9 @@ check_git_repo() {
 install_hooks() {
     echo -e "${BLUE}=== BlockAICommitMessage フックのインストール ===${NC}\n"
     
+    # ターゲットリポジトリに移動
+    cd "$TARGET_REPO" || exit 1
+    
     check_git_repo
     
     local git_dir=$(git rev-parse --git-dir)
@@ -40,7 +80,7 @@ install_hooks() {
     local hooks=("pre-commit" "prepare-commit-msg")
     
     for hook in "${hooks[@]}"; do
-        local source_file="$PROJECT_ROOT/hooks/$hook"
+        local source_file="$BLOCKAICOMMIT_ROOT/hooks/$hook"
         local target_file="$hooks_dir/$hook"
         
         if [ ! -f "$source_file" ]; then
@@ -65,10 +105,48 @@ install_hooks() {
             echo -e "${GREEN}バックアップを作成しました${NC}"
         fi
         
-        # フックをコピー
-        cp "$source_file" "$target_file"
+        # インストール方法を選択
+        if [ "$INSTALL_METHOD" = "standalone" ]; then
+            # スタンドアロンインストール（依存関係を含めてコピー）
+            echo -e "${YELLOW}スタンドアロンインストール中...${NC}"
+            
+            # 一時ファイルを作成
+            local temp_hook=$(mktemp)
+            
+            # フックファイルのヘッダー
+            cat > "$temp_hook" << 'EOF'
+#!/bin/bash
+# BlockAICommitMessage - Standalone Hook
+# このフックは独立して動作します
+
+EOF
+            
+            # 必要なライブラリを埋め込む
+            if [[ "$hook" == "prepare-commit-msg" ]]; then
+                echo "# 埋め込みAIパターン定義" >> "$temp_hook"
+                cat "$BLOCKAICOMMIT_ROOT/scripts/lib/ai-patterns.sh" >> "$temp_hook"
+                echo "" >> "$temp_hook"
+                echo "# 埋め込み検出ロジック" >> "$temp_hook"
+                # detect-ai-message.shの主要部分を埋め込む
+                sed -n '/^# AI署名パターン/,/^# 結果出力/p' "$BLOCKAICOMMIT_ROOT/scripts/detect-ai-message.sh" >> "$temp_hook"
+            fi
+            
+            # 元のフックロジックを追加（外部依存を削除）
+            sed 's|"\$DETECT_SCRIPT"|bash -c "$(declare -f detect_ai_message); detect_ai_message"|g' "$source_file" >> "$temp_hook"
+            
+            mv "$temp_hook" "$target_file"
+        else
+            # 通常のインストール（シンボリックリンクまたはコピー）
+            if [ "$INSTALL_METHOD" = "symlink" ]; then
+                ln -sf "$source_file" "$target_file"
+                echo -e "${GREEN}✓ シンボリックリンク作成: $hook${NC}"
+            else
+                cp "$source_file" "$target_file"
+                echo -e "${GREEN}✓ コピー: $hook${NC}"
+            fi
+        fi
+        
         chmod +x "$target_file"
-        echo -e "${GREEN}✓ インストール: $hook${NC}"
         installed=$((installed + 1))
     done
     
@@ -93,8 +171,8 @@ install_global() {
     
     # ファイルのコピー
     echo "ファイルをコピー中..."
-    cp -r "$PROJECT_ROOT/scripts/"* "$install_dir/scripts/"
-    cp -r "$PROJECT_ROOT/hooks/"* "$install_dir/hooks/"
+    cp -r "$BLOCKAICOMMIT_ROOT/scripts/"* "$install_dir/scripts/"
+    cp -r "$BLOCKAICOMMIT_ROOT/hooks/"* "$install_dir/hooks/"
     
     # 設定ファイルのテンプレートを作成
     if [ ! -f "$install_dir/config/ai-detection.conf" ]; then
@@ -125,6 +203,9 @@ EOF
 # アンインストール関数
 uninstall_hooks() {
     echo -e "${BLUE}=== フックのアンインストール ===${NC}\n"
+    
+    # ターゲットリポジトリに移動
+    cd "$TARGET_REPO" || exit 1
     
     check_git_repo
     
@@ -168,6 +249,9 @@ uninstall_hooks() {
 check_status() {
     echo -e "${BLUE}=== BlockAICommitMessage 状態確認 ===${NC}\n"
     
+    # ターゲットリポジトリに移動
+    cd "$TARGET_REPO" || exit 1
+    
     check_git_repo
     
     local git_dir=$(git rev-parse --git-dir)
@@ -205,14 +289,18 @@ check_status() {
     
     # 検出スクリプトの確認
     echo -e "\n${YELLOW}スクリプト:${NC}"
-    if [ -f "$PROJECT_ROOT/scripts/detect-ai-message.sh" ]; then
-        echo -e "  ${GREEN}✓${NC} detect-ai-message.sh"
+    if [ -f "$BLOCKAICOMMIT_ROOT/scripts/detect-ai-message.sh" ]; then
+        echo -e "  ${GREEN}✓${NC} detect-ai-message.sh (ソース: $BLOCKAICOMMIT_ROOT)"
+    elif [ -f "$HOME/.blockaicommit/scripts/detect-ai-message.sh" ]; then
+        echo -e "  ${GREEN}✓${NC} detect-ai-message.sh (グローバルインストール)"
     else
         echo -e "  ${RED}✗${NC} detect-ai-message.sh"
     fi
     
-    if [ -f "$PROJECT_ROOT/scripts/clean-commit.sh" ]; then
-        echo -e "  ${GREEN}✓${NC} clean-commit.sh"
+    if [ -f "$BLOCKAICOMMIT_ROOT/scripts/clean-commit.sh" ]; then
+        echo -e "  ${GREEN}✓${NC} clean-commit.sh (ソース: $BLOCKAICOMMIT_ROOT)"
+    elif [ -f "$HOME/.blockaicommit/scripts/clean-commit.sh" ]; then
+        echo -e "  ${GREEN}✓${NC} clean-commit.sh (グローバルインストール)"
     else
         echo -e "  ${RED}✗${NC} clean-commit.sh"
     fi
@@ -220,14 +308,36 @@ check_status() {
 
 # ヘルプ表示
 show_help() {
-    echo "使用方法: $0 [command]"
+    echo "使用方法: $0 [command] [オプション] [対象リポジトリパス]"
     echo ""
     echo "コマンド:"
-    echo "  install         現在のリポジトリにフックをインストール"
-    echo "  install-global  すべてのリポジトリ用にグローバルインストール"
-    echo "  uninstall       現在のリポジトリからフックを削除"
-    echo "  status          インストール状態を確認（デフォルト）"
-    echo "  help            このヘルプを表示"
+    echo "  install          指定リポジトリにフックをインストール"
+    echo "  install-global   すべてのリポジトリ用にグローバルインストール"
+    echo "  uninstall        指定リポジトリからフックを削除"
+    echo "  status           インストール状態を確認"
+    echo "  help             このヘルプを表示"
+    echo ""
+    echo "インストールオプション:"
+    echo "  --copy           フックをコピー（デフォルト）"
+    echo "  --symlink        シンボリックリンクを作成"
+    echo "  --standalone     依存関係を埋め込んだ独立版を作成"
+    echo ""
+    echo "例:"
+    echo "  # デフォルト（コピー方式）"
+    echo "  $0 install ~/MyProject"
+    echo ""
+    echo "  # シンボリックリンク（開発中のプロジェクトに推奨）"
+    echo "  $0 install --symlink ~/MyProject"
+    echo ""
+    echo "  # スタンドアロン（本番環境に推奨）"
+    echo "  $0 install --standalone ~/MyProject"
+    echo ""
+    echo "  # グローバルインストール"
+    echo "  $0 install-global"
+    echo ""
+    echo "注意:"
+    echo "  - copy/symlink: BlockAICommitMessageの削除・移動で動作しなくなります"
+    echo "  - standalone: 完全に独立して動作しますが、更新は反映されません"
 }
 
 # メイン処理

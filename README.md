@@ -20,15 +20,40 @@ cd BlockAICommitMessage
 
 ### 2. インストール
 
-現在のリポジトリにインストール:
+#### インストール方法の選択
+
+3つのインストール方法から選択できます：
+
+| 方法 | オプション | 依存性 | 推奨用途 |
+|------|-----------|--------|----------|
+| **コピー方式** | (デフォルト) | BlockAICommitMessageに依存 | 一時的な使用 |
+| **シンボリックリンク** | `--symlink` | BlockAICommitMessageに強く依存 | 開発中のプロジェクト |
+| **スタンドアロン** | `--standalone` | 依存なし（独立動作） | 本番/長期プロジェクト |
+
+#### 特定のリポジトリにインストール
+
 ```bash
-./scripts/setup-hooks.sh install
+# デフォルト（コピー方式）
+./scripts/setup-hooks.sh install ~/MyProject
+
+# シンボリックリンク方式（更新が自動反映）
+./scripts/setup-hooks.sh install --symlink ~/MyProject
+
+# スタンドアロン方式（完全に独立、BlockAICommitMessageを削除しても動作）
+./scripts/setup-hooks.sh install --standalone ~/MyProject
 ```
 
-すべてのリポジトリで使用（グローバル）:
+#### すべてのリポジトリで使用（グローバル）
 ```bash
+# ホームディレクトリに完全コピーしてグローバル設定
 ./scripts/setup-hooks.sh install-global
 ```
+
+#### 注意事項
+
+- **コピー/シンボリックリンク方式**: BlockAICommitMessageのリポジトリを削除・移動すると動作しなくなります
+- **スタンドアロン方式**: すべての機能をフックに埋め込むため、ファイルサイズが大きくなりますが、完全に独立して動作します
+- **グローバルインストール**: `~/.blockaicommit/`にファイルをコピーするため、常に独立して動作します
 
 ### 3. 使用方法
 

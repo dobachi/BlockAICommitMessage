@@ -5,11 +5,19 @@
 
 # フックのディレクトリを取得
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$HOOK_DIR/.." && pwd)"
 
-# 設定ファイルの読み込み
-CONFIG_FILE="$PROJECT_ROOT/config/ai-detection.conf"
-if [ -f "$CONFIG_FILE" ]; then
+# 設定ファイルの場所を探す
+CONFIG_FILE=""
+if [ -f "$HOOK_DIR/../../config/ai-detection.conf" ]; then
+    CONFIG_FILE="$HOOK_DIR/../../config/ai-detection.conf"
+elif [ -f "$HOME/.blockaicommit/config/ai-detection.conf" ]; then
+    CONFIG_FILE="$HOME/.blockaicommit/config/ai-detection.conf"
+elif [ -n "$BLOCKAICOMMIT_ROOT" ] && [ -f "$BLOCKAICOMMIT_ROOT/config/ai-detection.conf" ]; then
+    CONFIG_FILE="$BLOCKAICOMMIT_ROOT/config/ai-detection.conf"
+fi
+
+# 設定ファイルが見つかった場合は読み込む
+if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
 fi
 

@@ -5,17 +5,26 @@
 
 # フックのディレクトリを取得
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$HOOK_DIR/.." && pwd)"
 
-# 検出スクリプトの場所を探す
+# 検出スクリプトの場所を探す（複数の場所をチェック）
 DETECT_SCRIPT=""
-if [ -f "$PROJECT_ROOT/scripts/detect-ai-message.sh" ]; then
-    DETECT_SCRIPT="$PROJECT_ROOT/scripts/detect-ai-message.sh"
+
+# 1. フックと同じディレクトリ（シンボリックリンクの場合）
+if [ -f "$HOOK_DIR/../../scripts/detect-ai-message.sh" ]; then
+    DETECT_SCRIPT="$HOOK_DIR/../../scripts/detect-ai-message.sh"
+# 2. グローバルインストール
 elif [ -f "$HOME/.blockaicommit/scripts/detect-ai-message.sh" ]; then
     DETECT_SCRIPT="$HOME/.blockaicommit/scripts/detect-ai-message.sh"
+# 3. 環境変数で指定された場所
+elif [ -n "$BLOCKAICOMMIT_ROOT" ] && [ -f "$BLOCKAICOMMIT_ROOT/scripts/detect-ai-message.sh" ]; then
+    DETECT_SCRIPT="$BLOCKAICOMMIT_ROOT/scripts/detect-ai-message.sh"
+# 4. よく使われるインストール先
+elif [ -f "/usr/local/share/blockaicommit/scripts/detect-ai-message.sh" ]; then
+    DETECT_SCRIPT="/usr/local/share/blockaicommit/scripts/detect-ai-message.sh"
 else
     # 検出スクリプトが見つからない場合は警告のみ
     echo "Warning: AI detection script not found. Proceeding without AI check." >&2
+    echo "Hint: Set BLOCKAICOMMIT_ROOT environment variable or install globally." >&2
     exit 0
 fi
 
