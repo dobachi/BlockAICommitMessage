@@ -1,0 +1,63 @@
+#!/bin/bash
+
+# Git prepare-commit-msg hook
+# AIコミットメッセージを検出してブロック
+
+# フックのディレクトリを取得
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$HOOK_DIR/.." && pwd)"
+
+# 検出スクリプトの場所を探す
+DETECT_SCRIPT=""
+if [ -f "$PROJECT_ROOT/scripts/detect-ai-message.sh" ]; then
+    DETECT_SCRIPT="$PROJECT_ROOT/scripts/detect-ai-message.sh"
+elif [ -f "$HOME/.blockaicommit/scripts/detect-ai-message.sh" ]; then
+    DETECT_SCRIPT="$HOME/.blockaicommit/scripts/detect-ai-message.sh"
+else
+    # 検出スクリプトが見つからない場合は警告のみ
+    echo "Warning: AI detection script not found. Proceeding without AI check." >&2
+    exit 0
+fi
+
+# コミットメッセージファイル
+COMMIT_MSG_FILE=$1
+COMMIT_SOURCE=$2
+SHA1=$3
+
+# merge, squash, templateの場合はスキップ
+if [ "$COMMIT_SOURCE" = "merge" ] || [ "$COMMIT_SOURCE" = "squash" ] || [ "$COMMIT_SOURCE" = "template" ]; then
+    exit 0
+fi
+
+# コミットメッセージを読み込む
+MESSAGE=$(cat "$COMMIT_MSG_FILE")
+
+# 空のメッセージはスキップ
+if [ -z "$MESSAGE" ] || [ "$MESSAGE" = "" ]; then
+    exit 0
+fi
+
+# AIメッセージ検出を実行
+if ! "$DETECT_SCRIPT" "$MESSAGE" > /dev/null 2>&1; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "⚠️  AIコミットメッセージが検出されました" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    
+    # 詳細な検出結果を表示
+    "$DETECT_SCRIPT" "$MESSAGE" >&2
+    
+    echo "" >&2
+    echo "対処方法:" >&2
+    echo "1. 人間らしい自然なメッセージに書き直す" >&2
+    echo "2. scripts/clean-commit.sh を使用する" >&2
+    echo "3. git commit --no-verify でスキップ（非推奨）" >&2
+    echo "" >&2
+    
+    # コミットを中止
+    exit 1
+fi
+
+# 問題なければ続行
+exit 0

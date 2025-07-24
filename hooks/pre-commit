@@ -1,0 +1,44 @@
+#!/bin/bash
+
+# Git pre-commit hook
+# コミット前の事前チェック
+
+# フックのディレクトリを取得
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$HOOK_DIR/.." && pwd)"
+
+# 設定ファイルの読み込み
+CONFIG_FILE="$PROJECT_ROOT/config/ai-detection.conf"
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+fi
+
+# デフォルト設定
+WARN_STAGING_EMPTY=${WARN_STAGING_EMPTY:-true}
+CHECK_FILE_PATTERNS=${CHECK_FILE_PATTERNS:-true}
+
+# ステージングエリアのチェック
+if [ "$WARN_STAGING_EMPTY" = "true" ]; then
+    if git diff --cached --quiet; then
+        echo "警告: ステージングエリアに変更がありません" >&2
+        exit 1
+    fi
+fi
+
+# AIツールの設定ファイルをコミットしようとしていないかチェック
+if [ "$CHECK_FILE_PATTERNS" = "true" ]; then
+    AI_CONFIG_FILES=$(git diff --cached --name-only | grep -E "(\.ai-|copilot-|claude-|gpt-)")
+    if [ -n "$AI_CONFIG_FILES" ]; then
+        echo "警告: AIツールの設定ファイルが含まれています:" >&2
+        echo "$AI_CONFIG_FILES" >&2
+        echo "" >&2
+        echo "これらのファイルを本当にコミットしますか？ (y/N)" >&2
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    fi
+fi
+
+# すべてのチェックをパス
+exit 0
